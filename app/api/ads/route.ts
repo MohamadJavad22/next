@@ -176,16 +176,35 @@ export async function GET(request: Request) {
         return NextResponse.json([], { status: 500 });
       }
 
-      const stmt = db.prepare(`
-        SELECT ads.*, 
-               (SELECT image_url FROM ad_images WHERE ad_id = ads.id AND is_primary = 1 LIMIT 1) as primary_image
-        FROM ads 
-        WHERE shop_id = ? 
-        ORDER BY created_at DESC 
-        LIMIT ?
-      `);
-      
-      filteredAds = stmt.all(parseInt(shopId), limit);
+      // دریافت user_id فروشگاه
+      const shopInfo = db.prepare('SELECT user_id FROM shops WHERE id = ?').get(parseInt(shopId)) as { user_id: number } | undefined;
+      const shopUserId = shopInfo?.user_id;
+
+      // اگر shopUserId پیدا شد، آگهی‌های با shop_id و آگهی‌های قدیمی (shop_id IS NULL) را برگردان
+      if (shopUserId) {
+        const stmt = db.prepare(`
+          SELECT ads.*, 
+                 (SELECT image_url FROM ad_images WHERE ad_id = ads.id AND is_primary = 1 LIMIT 1) as primary_image
+          FROM ads 
+          WHERE (shop_id = ? OR (user_id = ? AND (shop_id IS NULL OR shop_id = '')))
+          ORDER BY created_at DESC 
+          LIMIT ?
+        `);
+        
+        filteredAds = stmt.all(parseInt(shopId), shopUserId, limit);
+      } else {
+        // اگر user_id پیدا نشد، فقط آگهی‌های با shop_id را برگردان
+        const stmt = db.prepare(`
+          SELECT ads.*, 
+                 (SELECT image_url FROM ad_images WHERE ad_id = ads.id AND is_primary = 1 LIMIT 1) as primary_image
+          FROM ads 
+          WHERE shop_id = ? 
+          ORDER BY created_at DESC 
+          LIMIT ?
+        `);
+        
+        filteredAds = stmt.all(parseInt(shopId), limit);
+      }
       
       // Get all images for each ad
       filteredAds = filteredAds.map((ad: any) => {

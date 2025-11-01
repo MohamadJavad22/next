@@ -83,6 +83,47 @@ try {
   // Ignore
 }
 
+// Migration: بروزرسانی shop_id برای آگهی‌های قدیمی
+try {
+  const tableInfo = db.prepare("PRAGMA table_info(ads)").all() as Array<{ name: string }>;
+  const hasShopIdColumn = tableInfo.some(col => col.name === 'shop_id');
+  
+  if (hasShopIdColumn) {
+    // پیدا کردن آگهی‌هایی که shop_id ندارند اما user_id آنها با shops.user_id مطابقت دارد
+    const adsToUpdate = db.prepare(`
+      SELECT ads.id, ads.user_id, shops.id as shop_id
+      FROM ads
+      JOIN shops ON ads.user_id = shops.user_id
+      WHERE (ads.shop_id IS NULL OR ads.shop_id = '')
+        AND shops.status = 'active'
+      ORDER BY shops.created_at DESC
+    `).all() as Array<{ id: number; user_id: number; shop_id: number }>;
+    
+    // فقط اولین shop هر user را برای آگهی‌های قدیمی استفاده کن
+    const updateStmt = db.prepare('UPDATE ads SET shop_id = ? WHERE id = ?');
+    const updatedAds: number[] = [];
+    
+    for (const ad of adsToUpdate) {
+      // اگر این آگهی قبلاً update نشده باشد
+      if (!updatedAds.includes(ad.id)) {
+        try {
+          updateStmt.run(ad.shop_id, ad.id);
+          updatedAds.push(ad.id);
+          console.log(`✅ Migrated ad ${ad.id} to shop ${ad.shop_id}`);
+        } catch (e) {
+          console.error(`❌ Error updating ad ${ad.id}:`, e);
+        }
+      }
+    }
+    
+    if (updatedAds.length > 0) {
+      console.log(`✅ Migration: Updated ${updatedAds.length} ads with shop_id`);
+    }
+  }
+} catch (error) {
+  console.error('❌ Error in shop_id migration:', error);
+}
+
 // 🖼️ ساخت جدول ad_images برای تصاویر آگهی‌ها
 db.exec(`
   CREATE TABLE IF NOT EXISTS ad_images (
